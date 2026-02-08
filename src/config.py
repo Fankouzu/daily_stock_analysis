@@ -20,7 +20,11 @@ from dataclasses import dataclass, field
 def setup_env():
     """初始化环境变量（支持从 .env 加载）"""
     # src/config.py -> src/ -> root
-    env_path = Path(__file__).parent.parent / '.env'
+    env_file = os.getenv("ENV_FILE")
+    if env_file:
+        env_path = Path(env_file)
+    else:
+        env_path = Path(__file__).parent.parent / '.env'
     load_dotenv(dotenv_path=env_path)
 
 
@@ -66,6 +70,7 @@ class Config:
     # === 搜索引擎配置（支持多 Key 负载均衡）===
     bocha_api_keys: List[str] = field(default_factory=list)  # Bocha API Keys
     tavily_api_keys: List[str] = field(default_factory=list)  # Tavily API Keys
+    brave_api_keys: List[str] = field(default_factory=list)  # Brave Search API Keys
     serpapi_keys: List[str] = field(default_factory=list)  # SerpAPI Keys
     
     # === 通知配置（可同时配置多个，全部推送）===
@@ -79,9 +84,11 @@ class Config:
     # Telegram 配置（需要同时配置 Bot Token 和 Chat ID）
     telegram_bot_token: Optional[str] = None  # Bot Token（@BotFather 获取）
     telegram_chat_id: Optional[str] = None  # Chat ID
+    telegram_message_thread_id: Optional[str] = None  # Topic ID (Message Thread ID) for groups
     
     # 邮件配置（只需邮箱和授权码，SMTP 自动识别）
     email_sender: Optional[str] = None  # 发件人邮箱
+    email_sender_name: str = "daily_stock_analysis股票分析助手"  # 发件人显示名称
     email_password: Optional[str] = None  # 邮箱密码/授权码
     email_receivers: List[str] = field(default_factory=list)  # 收件人列表（留空则发给自己）
     
@@ -98,7 +105,11 @@ class Config:
     discord_bot_token: Optional[str] = None  # Discord Bot Token
     discord_main_channel_id: Optional[str] = None  # Discord 主频道 ID
     discord_webhook_url: Optional[str] = None  # Discord Webhook URL
-    
+
+    # AstrBot 通知配置
+    astrbot_token: Optional[str] = None
+    astrbot_url: Optional[str] = None
+
     # 单股推送模式：每分析完一只股票立即推送，而不是汇总后推送
     single_stock_notify: bool = False
 
@@ -107,6 +118,9 @@ class Config:
 
     # PushPlus 推送配置
     pushplus_token: Optional[str] = None  # PushPlus Token
+
+    # Server酱3 推送配置
+    serverchan3_sendkey: Optional[str] = None  # Server酱3 SendKey
 
     # 分析间隔时间（秒）- 用于避免API限流
     analysis_delay: float = 0.0  # 个股分析与大盘分析之间的延迟
@@ -118,6 +132,9 @@ class Config:
     
     # === 数据库配置 ===
     database_path: str = "./data/stock_analysis.db"
+
+    # 是否保存分析上下文快照（用于历史回溯）
+    save_context_snapshot: bool = True
     
     # === 日志配置 ===
     log_dir: str = "./logs"  # 日志文件目录
@@ -140,7 +157,12 @@ class Config:
     # 筹码分布开关（该接口不稳定，云端部署建议关闭）
     enable_chip_distribution: bool = True
     # 实时行情数据源优先级（逗号分隔）
-    realtime_source_priority: str = "akshare_sina,tencent,efinance,akshare_em"
+    # 推荐顺序：tencent > akshare_sina > efinance > akshare_em > tushare
+    # - tencent: 腾讯财经，有量比/换手率/市盈率等，单股查询稳定（推荐）
+    # - akshare_sina: 新浪财经，基本行情稳定，但无量比
+    # - efinance/akshare_em: 东财全量接口，数据最全但容易被封
+    # - tushare: Tushare Pro，需要2000积分，数据全面（付费用户可优先使用）
+    realtime_source_priority: str = "tencent,akshare_sina,efinance,akshare_em"
     # 实时行情缓存时间（秒）
     realtime_cache_ttl: int = 600
     # 熔断器冷却时间（秒）
@@ -290,6 +312,9 @@ class Config:
         serpapi_keys_str = os.getenv('SERPAPI_API_KEYS', '')
         serpapi_keys = [k.strip() for k in serpapi_keys_str.split(',') if k.strip()]
 
+        brave_keys_str = os.getenv('BRAVE_API_KEYS', '')
+        brave_api_keys = [k.strip() for k in brave_keys_str.split(',') if k.strip()]
+
         # 企微消息类型与最大字节数逻辑
         wechat_msg_type = os.getenv('WECHAT_MSG_TYPE', 'markdown')
         wechat_msg_type_lower = wechat_msg_type.lower()
@@ -319,22 +344,28 @@ class Config:
             openai_temperature=float(os.getenv('OPENAI_TEMPERATURE', '0.7')),
             bocha_api_keys=bocha_api_keys,
             tavily_api_keys=tavily_api_keys,
+            brave_api_keys=brave_api_keys,
             serpapi_keys=serpapi_keys,
             wechat_webhook_url=os.getenv('WECHAT_WEBHOOK_URL'),
             feishu_webhook_url=os.getenv('FEISHU_WEBHOOK_URL'),
             telegram_bot_token=os.getenv('TELEGRAM_BOT_TOKEN'),
             telegram_chat_id=os.getenv('TELEGRAM_CHAT_ID'),
+            telegram_message_thread_id=os.getenv('TELEGRAM_MESSAGE_THREAD_ID'),
             email_sender=os.getenv('EMAIL_SENDER'),
+            email_sender_name=os.getenv('EMAIL_SENDER_NAME', 'daily_stock_analysis股票分析助手'),
             email_password=os.getenv('EMAIL_PASSWORD'),
             email_receivers=[r.strip() for r in os.getenv('EMAIL_RECEIVERS', '').split(',') if r.strip()],
             pushover_user_key=os.getenv('PUSHOVER_USER_KEY'),
             pushover_api_token=os.getenv('PUSHOVER_API_TOKEN'),
             pushplus_token=os.getenv('PUSHPLUS_TOKEN'),
+            serverchan3_sendkey=os.getenv('SERVERCHAN3_SENDKEY'),
             custom_webhook_urls=[u.strip() for u in os.getenv('CUSTOM_WEBHOOK_URLS', '').split(',') if u.strip()],
             custom_webhook_bearer_token=os.getenv('CUSTOM_WEBHOOK_BEARER_TOKEN'),
             discord_bot_token=os.getenv('DISCORD_BOT_TOKEN'),
             discord_main_channel_id=os.getenv('DISCORD_MAIN_CHANNEL_ID'),
             discord_webhook_url=os.getenv('DISCORD_WEBHOOK_URL'),
+            astrbot_url=os.getenv('ASTRBOT_URL'),
+            astrbot_token=os.getenv('ASTRBOT_TOKEN'),
             single_stock_notify=os.getenv('SINGLE_STOCK_NOTIFY', 'false').lower() == 'true',
             report_type=os.getenv('REPORT_TYPE', 'simple').lower(),
             analysis_delay=float(os.getenv('ANALYSIS_DELAY', '0')),
@@ -342,6 +373,7 @@ class Config:
             wechat_max_bytes=wechat_max_bytes,
             wechat_msg_type=wechat_msg_type_lower,
             database_path=os.getenv('DATABASE_PATH', './data/stock_analysis.db'),
+            save_context_snapshot=os.getenv('SAVE_CONTEXT_SNAPSHOT', 'true').lower() == 'true',
             log_dir=os.getenv('LOG_DIR', './logs'),
             log_level=os.getenv('LOG_LEVEL', 'INFO'),
             max_workers=int(os.getenv('MAX_WORKERS', '3')),
@@ -381,9 +413,11 @@ class Config:
             enable_realtime_quote=os.getenv('ENABLE_REALTIME_QUOTE', 'true').lower() == 'true',
             enable_chip_distribution=os.getenv('ENABLE_CHIP_DISTRIBUTION', 'true').lower() == 'true',
             # 实时行情数据源优先级：
-            # - akshare_sina/tencent: 单股票直连查询，轻量级，推荐放前面
-            # - efinance/akshare_em: 全量拉取，数据丰富但负载大
-            realtime_source_priority=os.getenv('REALTIME_SOURCE_PRIORITY', 'akshare_sina,tencent,efinance,akshare_em'),
+            # - tencent: 腾讯财经，有量比/换手率/PE/PB等，单股查询稳定（推荐）
+            # - akshare_sina: 新浪财经，基本行情稳定，但无量比
+            # - efinance/akshare_em: 东财全量接口，数据最全但容易被封
+            # - tushare: Tushare Pro，需要2000积分，数据全面
+            realtime_source_priority=os.getenv('REALTIME_SOURCE_PRIORITY', 'tencent,akshare_sina,efinance,akshare_em'),
             realtime_cache_ttl=int(os.getenv('REALTIME_CACHE_TTL', '600')),
             circuit_breaker_cooldown=int(os.getenv('CIRCUIT_BREAKER_COOLDOWN', '300'))
         )
@@ -403,7 +437,8 @@ class Config:
         """
         # 优先从 .env 文件读取最新配置，这样即使在容器环境中修改了 .env 文件，
         # 也能获取到最新的股票列表配置
-        env_path = Path(__file__).parent.parent / '.env'
+        env_file = os.getenv("ENV_FILE")
+        env_path = Path(env_file) if env_file else (Path(__file__).parent.parent / '.env')
         stock_list_str = ''
         if env_path.exists():
             # 直接从 .env 文件读取最新的配置
@@ -445,8 +480,8 @@ class Config:
         elif not self.gemini_api_key:
             warnings.append("提示：未配置 Gemini API Key，将使用 OpenAI 兼容 API")
         
-        if not self.bocha_api_keys and not self.tavily_api_keys and not self.serpapi_keys:
-            warnings.append("提示：未配置搜索引擎 API Key (Bocha/Tavily/SerpAPI)，新闻搜索功能将不可用")
+        if not self.bocha_api_keys and not self.tavily_api_keys and not self.brave_api_keys and not self.serpapi_keys:
+            warnings.append("提示：未配置搜索引擎 API Key (Bocha/Tavily/Brave/SerpAPI)，新闻搜索功能将不可用")
         
         # 检查通知配置
         has_notification = (
@@ -456,6 +491,7 @@ class Config:
             (self.email_sender and self.email_password) or
             (self.pushover_user_key and self.pushover_api_token) or
             self.pushplus_token or
+            self.serverchan3_sendkey or
             (self.custom_webhook_urls and self.custom_webhook_bearer_token) or
             (self.discord_bot_token and self.discord_main_channel_id) or
             self.discord_webhook_url
